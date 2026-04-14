@@ -22,7 +22,13 @@ PDF OCR Converter is a static, browser-only website for extracting text from PDF
 
 ## Usage
 
-1. Open `index.html` in a modern browser.
+1. Start a local static server in the project folder:
+
+   ```powershell
+   python -m http.server 8000
+   ```
+
+2. Open `http://localhost:8000` in a modern browser.
 2. Drag a PDF or image onto the upload area, or click to browse.
 3. Select the OCR language.
 4. For PDFs, set the page range such as `1-3,5`.
@@ -33,4 +39,4 @@ PDF OCR Converter is a static, browser-only website for extracting text from PDF
 
 - The first OCR run for a language may take longer because the browser downloads trained data.
 - Performance depends on file size, image quality, and browser resources.
-- This project is fully client-side, but using a simple static server can improve browser compatibility compared with opening the file directly via `file://`.
+- Do not open `index.html` directly via `file://`. Browsers treat local files as special security origins, which can break OCR workers and file handling. Use a local static server instead.

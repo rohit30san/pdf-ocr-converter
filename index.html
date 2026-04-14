@@ -282,6 +282,21 @@
       gap: 12px;
     }
 
+    .banner {
+      display: none;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid rgba(180, 83, 9, 0.2);
+      background: rgba(255, 251, 235, 0.9);
+      color: #92400e;
+      font-weight: 600;
+      line-height: 1.6;
+    }
+
+    .banner.visible {
+      display: block;
+    }
+
     .status-card {
       padding: 14px;
       border-radius: 16px;
@@ -395,6 +410,14 @@
     </section>
 
     <section class="panel workspace">
+      <div id="protocolBanner" class="banner" aria-live="polite">
+        This page is running from <code>file://</code>, which breaks browser OCR workflows in many browsers.
+        Serve this folder over local HTTP instead, for example:
+        <code>python -m http.server 8000</code>
+        and then open
+        <code>http://localhost:8000</code>.
+      </div>
+
       <div
         id="dropzone"
         class="dropzone"
@@ -489,6 +512,7 @@
       startBtn: document.getElementById("startBtn"),
       downloadBtn: document.getElementById("downloadBtn"),
       copyBtn: document.getElementById("copyBtn"),
+      protocolBanner: document.getElementById("protocolBanner"),
       fileLabel: document.getElementById("fileLabel"),
       fileTypeValue: document.getElementById("fileTypeValue"),
       pageCountValue: document.getElementById("pageCountValue"),
@@ -828,6 +852,11 @@
     elements.dropzone.addEventListener("drop", (event) => {
       handleDrop(event.dataTransfer.files);
     });
+
+    if (window.location.protocol === "file:") {
+      elements.protocolBanner.classList.add("visible");
+      setMessage("Open this app through a local HTTP server instead of file:// for reliable OCR.", true);
+    }
 
     updateStatusCards();
     updateActionButtons();
