@@ -11,6 +11,7 @@ PDF OCR Converter is a static, browser-only website for extracting text from PDF
 - Page range selection for PDFs
 - Live progress bar during OCR
 - Per-page output tabs
+- Download searchable OCR PDF output
 - Download extracted text as `.txt`
 - Copy all extracted text to the clipboard
 
@@ -19,21 +20,30 @@ PDF OCR Converter is a static, browser-only website for extracting text from PDF
 - HTML, CSS, and vanilla JavaScript
 - [PDF.js](https://mozilla.github.io/pdf.js/)
 - [Tesseract.js](https://tesseract.projectnaptha.com/)
+- [PDF-LIB](https://pdf-lib.js.org/)
 
 ## Usage
 
-1. Start a local static server in the project folder:
+1. Start the local static server in one of these ways:
+
+   Double-click `start.bat`
+
+   or run:
 
    ```powershell
    python -m http.server 8000
    ```
 
 2. Open `http://localhost:8000` in a modern browser.
-2. Drag a PDF or image onto the upload area, or click to browse.
-3. Select the OCR language.
-4. For PDFs, set the page range such as `1-3,5`.
-5. Click `Start OCR`.
-6. Review results page by page, then download or copy the extracted text.
+3. Drag a PDF or image onto the upload area, or click to browse.
+4. Select the OCR language.
+5. For PDFs, set the page range such as `1-3,5`.
+6. Click `Start OCR`.
+7. Review results page by page, then download the searchable OCR PDF or export the extracted text.
+
+## Deployment
+
+This project can be deployed as a public static site on GitHub Pages because it has no backend requirements.
 
 ## Notes
 

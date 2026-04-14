@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF OCR Converter</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='50%25' y='54%25' text-anchor='middle' dominant-baseline='middle' font-family='Arial,sans-serif' font-size='26' font-weight='700' fill='white'%3EOCR%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -11,7 +12,8 @@
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/6.0.1/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
   <style>
     :root {
       --bg: #eef2f7;
@@ -398,7 +400,7 @@
           <span class="chip">No backend</span>
           <span class="chip">Drag and drop</span>
           <span class="chip">Per-page results</span>
-          <span class="chip">TXT export</span>
+          <span class="chip">Searchable PDF output</span>
         </div>
       </article>
 
@@ -457,6 +459,7 @@
         <div class="field full">
           <div class="action-row">
             <button id="startBtn" class="primary-btn" disabled>Start OCR</button>
+            <button id="downloadPdfBtn" class="ghost-btn" disabled>Download OCR PDF</button>
             <button id="downloadBtn" class="ghost-btn" disabled>Download .txt</button>
             <button id="copyBtn" class="ghost-btn" disabled>Copy all text</button>
             <span id="fileLabel" class="status-line">No file selected.</span>
@@ -496,12 +499,18 @@
     const state = {
       file: null,
       fileType: null,
-      pdfBytes: null,
       imageUrl: null,
       totalPages: 0,
       extractedPages: [],
       activePage: 0,
-      processing: false
+      processing: false,
+      worker: null,
+      workerLanguage: null,
+      ocrPdfBytes: null
+    };
+
+    const tesseractConfig = {
+      workerPath: "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/6.0.1/worker.min.js"
     };
 
     const elements = {
@@ -510,6 +519,7 @@
       language: document.getElementById("language"),
       pageRange: document.getElementById("pageRange"),
       startBtn: document.getElementById("startBtn"),
+      downloadPdfBtn: document.getElementById("downloadPdfBtn"),
       downloadBtn: document.getElementById("downloadBtn"),
       copyBtn: document.getElementById("copyBtn"),
       protocolBanner: document.getElementById("protocolBanner"),
@@ -538,6 +548,7 @@
     function resetOutput() {
       state.extractedPages = [];
       state.activePage = 0;
+      state.ocrPdfBytes = null;
       renderTabs();
       renderOutput();
       updateActionButtons();
@@ -554,10 +565,26 @@
       elements.progressText.textContent = label;
     }
 
+    function ensureLibrariesLoaded() {
+      if (!window.pdfjsLib) {
+        throw new Error("PDF.js did not load. Refresh the page and try again.");
+      }
+
+      if (!window.Tesseract) {
+        throw new Error("Tesseract.js did not load. Check your internet connection and refresh the page.");
+      }
+
+      if (!window.PDFLib) {
+        throw new Error("PDF-LIB did not load. Refresh the page and try again.");
+      }
+    }
+
     function updateActionButtons() {
       const hasFile = Boolean(state.file);
       const hasText = state.extractedPages.some((page) => page.text.trim());
+      const hasPdf = Boolean(state.ocrPdfBytes);
       elements.startBtn.disabled = !hasFile || state.processing;
+      elements.downloadPdfBtn.disabled = !hasPdf || state.processing;
       elements.downloadBtn.disabled = !hasText || state.processing;
       elements.copyBtn.disabled = !hasText || state.processing;
     }
@@ -575,7 +602,83 @@
       }
     }
 
+    async function terminateWorker() {
+      if (!state.worker) {
+        return;
+      }
+
+      try {
+        await state.worker.terminate();
+      } catch (error) {
+        console.warn("Tesseract worker termination failed.", error);
+      } finally {
+        state.worker = null;
+        state.workerLanguage = null;
+      }
+    }
+
+    async function getWorker(language, totalPages) {
+      ensureLibrariesLoaded();
+
+      if (state.worker && state.workerLanguage === language) {
+        return state.worker;
+      }
+
+      await terminateWorker();
+      setProgress(2, `Loading OCR engine for ${language}...`);
+
+      state.worker = await Tesseract.createWorker(language, 1, {
+        ...tesseractConfig,
+        logger: (message) => {
+          const progress = typeof message.progress === "number" ? message.progress : 0;
+          const label = message.status ? message.status.replace(/^\w/, (char) => char.toUpperCase()) : "Preparing OCR";
+          setProgress(progress * Math.max(6, 18 / Math.max(totalPages, 1)), `${label}...`);
+        }
+      });
+      state.workerLanguage = language;
+      return state.worker;
+    }
+
+    function normalizePdfBytes(pdfData) {
+      if (!pdfData) {
+        throw new Error("OCR engine did not return PDF output.");
+      }
+
+      if (pdfData instanceof Uint8Array) {
+        return pdfData;
+      }
+
+      if (pdfData instanceof ArrayBuffer) {
+        return new Uint8Array(pdfData);
+      }
+
+      if (typeof pdfData === "string") {
+        const cleaned = pdfData.includes(",") ? pdfData.split(",").pop() : pdfData;
+        const binary = atob(cleaned);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      throw new Error("Unsupported OCR PDF output format.");
+    }
+
+    async function mergePdfPages(pdfByteParts) {
+      const merged = await PDFLib.PDFDocument.create();
+
+      for (const part of pdfByteParts) {
+        const srcDoc = await PDFLib.PDFDocument.load(part);
+        const copiedPages = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
+        copiedPages.forEach((page) => merged.addPage(page));
+      }
+
+      return merged.save();
+    }
+
     async function loadSelectedFile(file) {
+      ensureLibrariesLoaded();
       revokeImageUrl();
       resetOutput();
       setMessage("");
@@ -595,14 +698,13 @@
       elements.fileLabel.textContent = `${file.name} selected`;
 
       if (isPdf) {
-        state.pdfBytes = new Uint8Array(await file.arrayBuffer());
-        const pdf = await pdfjsLib.getDocument({ data: state.pdfBytes }).promise;
+        const pdfBytes = new Uint8Array(await file.arrayBuffer());
+        const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
         state.totalPages = pdf.numPages;
         elements.pageRange.value = `1-${pdf.numPages}`;
         elements.pageRange.disabled = false;
         setMessage(`Loaded PDF with ${pdf.numPages} pages.`);
       } else {
-        state.pdfBytes = null;
         state.imageUrl = URL.createObjectURL(file);
         elements.pageRange.value = "1";
         elements.pageRange.disabled = true;
@@ -726,24 +828,29 @@
       }
 
       try {
+        ensureLibrariesLoaded();
         state.processing = true;
         resetOutput();
         updateActionButtons();
         elements.progressShell.classList.add("visible");
         setMessage("");
+        setProgress(1, "Preparing OCR engine...");
 
         let selectedPages = [1];
         let pdf = null;
 
         if (state.fileType === "pdf") {
-          pdf = await pdfjsLib.getDocument({ data: state.pdfBytes }).promise;
+          const pdfBytes = new Uint8Array(await state.file.arrayBuffer());
+          pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
           selectedPages = parsePageRange(elements.pageRange.value, pdf.numPages);
         }
 
         updateStatusCards();
-        setProgress(0, "Preparing OCR engine...");
+        setProgress(4, "Preparing OCR engine...");
+        const worker = await getWorker(elements.language.value, selectedPages.length);
 
         const totalPages = selectedPages.length;
+        const ocrPdfParts = [];
         for (let index = 0; index < totalPages; index += 1) {
           const pageNumber = selectedPages[index];
           const canvas = state.fileType === "pdf"
@@ -753,19 +860,17 @@
           const baseProgress = (index / totalPages) * 100;
           const slice = 100 / totalPages;
 
-          const result = await Tesseract.recognize(canvas, elements.language.value, {
-            logger: (message) => {
-              const localProgress = typeof message.progress === "number" ? message.progress : 0;
-              const combinedProgress = baseProgress + localProgress * slice;
-              const stepLabel = message.status ? message.status.replace(/^\w/, (char) => char.toUpperCase()) : "Working";
-              setProgress(combinedProgress, `${stepLabel} on page ${pageNumber} (${index + 1}/${totalPages})`);
-            }
+          setProgress(baseProgress, `Starting OCR on page ${pageNumber} (${index + 1}/${totalPages})...`);
+          const result = await worker.recognize(canvas, {}, {
+            text: true,
+            pdf: true
           });
 
           state.extractedPages.push({
             pageNumber,
             text: result.data.text || ""
           });
+          ocrPdfParts.push(normalizePdfBytes(result.data.pdf));
 
           state.activePage = state.extractedPages.length - 1;
           renderTabs();
@@ -773,7 +878,9 @@
           setProgress(((index + 1) / totalPages) * 100, `Finished page ${pageNumber} (${index + 1}/${totalPages})`);
         }
 
-        setMessage(`OCR complete. Extracted ${state.extractedPages.length} page${state.extractedPages.length === 1 ? "" : "s"}.`);
+        state.ocrPdfBytes = totalPages === 1 ? ocrPdfParts[0] : await mergePdfPages(ocrPdfParts);
+        updateActionButtons();
+        setMessage(`OCR complete. Extracted ${state.extractedPages.length} page${state.extractedPages.length === 1 ? "" : "s"} and built a searchable PDF.`);
       } catch (error) {
         setMessage(error.message || "OCR failed.", true);
       } finally {
@@ -790,6 +897,21 @@
       const baseName = state.file ? state.file.name.replace(/\.[^.]+$/, "") : "ocr-output";
       link.href = url;
       link.download = `${baseName}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function handlePdfDownload() {
+      if (!state.ocrPdfBytes) {
+        return;
+      }
+
+      const blob = new Blob([state.ocrPdfBytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const baseName = state.file ? state.file.name.replace(/\.[^.]+$/, "") : "ocr-output";
+      link.href = url;
+      link.download = `${baseName}-ocr.pdf`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -832,6 +954,7 @@
 
     elements.fileInput.addEventListener("change", (event) => handleDrop(event.target.files));
     elements.startBtn.addEventListener("click", runOcr);
+    elements.downloadPdfBtn.addEventListener("click", handlePdfDownload);
     elements.downloadBtn.addEventListener("click", handleDownload);
     elements.copyBtn.addEventListener("click", handleCopy);
 
@@ -857,6 +980,18 @@
       elements.protocolBanner.classList.add("visible");
       setMessage("Open this app through a local HTTP server instead of file:// for reliable OCR.", true);
     }
+
+    window.addEventListener("error", (event) => {
+      if (event.message) {
+        setMessage(`Runtime error: ${event.message}`, true);
+      }
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      const detail = reason && reason.message ? reason.message : String(reason || "Unknown error");
+      setMessage(`Unhandled error: ${detail}`, true);
+    });
 
     updateStatusCards();
     updateActionButtons();
